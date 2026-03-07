@@ -142,7 +142,6 @@ function App() {
         </div>
     );
 }
-}
 
 function Header({ darkMode, setDarkMode, setShowDocs, setShowGuide, isResultsPage, setCurrentView }) {
     return (

@@ -78,7 +78,7 @@ class TextToSpeechRequest(BaseModel):
 
 
 app = FastAPI(
-    title="VBOX Episodic Intelligence Engine API",
+    title="StoryArc AI - Episodic Intelligence Engine API",
     description="AI-powered narrative intelligence for vertical episodic storytelling.",
     version="2.0.0",
 )
