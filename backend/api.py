@@ -99,7 +99,20 @@ async def analyse_story(payload: AnalyseRequest):
         raise HTTPException(status_code=400, detail="core_idea cannot be empty.")
 
     try:
-        print(f"[DEBUG] Starting analysis for: {payload.core_idea[:50]}")
+        print(f"\n[DEBUG] ========== NEW REQUEST ==========")
+        print(f"[DEBUG] Core idea: {payload.core_idea[:50]}...")
+        print(f"[DEBUG] Episodes: {payload.episode_count}")
+        print(f"[DEBUG] Model: {payload.model_name}")
+        
+        # Check API key
+        from dotenv import load_dotenv
+        import os
+        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        load_dotenv(dotenv_path=env_path)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY environment variable not found")
+        print(f"[DEBUG] API key verified ✓")
         
         # Generate main episodic intelligence
         print(f"[DEBUG] Calling generate_episodic_intelligence...")

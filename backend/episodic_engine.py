@@ -6,12 +6,20 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 
-load_dotenv()
+# Load environment variables with explicit path
+import sys
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+print(f"[INFO] Loading .env from: {env_path}")
+load_dotenv(dotenv_path=env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+print(f"[INFO] GEMINI_API_KEY loaded: {bool(GEMINI_API_KEY)}")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    print(f"[INFO] Gemini API configured successfully")
+else:
+    print(f"[ERROR] GEMINI_API_KEY not found in environment")
 
 
 EPISODIC_SYSTEM_PROMPT = """
@@ -103,18 +111,42 @@ Instructions:
 
 
 def _safe_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Safely parse JSON with better error handling and logging."""
     if not raw_text:
+        print(f"[DEBUG] _safe_parse_json: raw_text is empty")
         return None
 
     candidate = raw_text.strip()
-    if "{" in candidate and "}" in candidate:
+    print(f"[DEBUG] _safe_parse_json: raw text length = {len(candidate)}, first 100 chars: {candidate[:100]}")
+    
+    # Find outermost braces - count braces to find the matching closing brace
+    if "{" in candidate:
         start = candidate.find("{")
-        end = candidate.rfind("}") + 1
+        # Find the matching closing brace by counting
+        brace_count = 0
+        end = start
+        for i in range(start, len(candidate)):
+            if candidate[i] == "{":
+                brace_count += 1
+            elif candidate[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end = i + 1
+                    break
+        
+        if brace_count != 0:
+            print(f"[DEBUG] _safe_parse_json: Unmatched braces detected (count={brace_count})")
+        
         candidate = candidate[start:end]
+        print(f"[DEBUG] _safe_parse_json: Extracted JSON length = {len(candidate)}")
 
     try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
+        parsed = json.loads(candidate)
+        print(f"[DEBUG] _safe_parse_json: Successfully parsed JSON")
+        return parsed
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] _safe_parse_json: JSON parse error: {str(e)}")
+        print(f"[ERROR] _safe_parse_json: Problematic text: {candidate[:200]}...")
         return None
 
 
@@ -224,46 +256,53 @@ async def generate_character_development(
     model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate detailed character development arcs and profiles"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    
-    model = genai.GenerativeModel(model_name=model_name)
-    
-    prompt = f"""
-    Based on this story concept: "{core_idea}"
-    
-    Create detailed character profiles for a {episodes}-episode vertical series.
-    For each character, provide:
-    1. Character name and archetype
-    2. Background/motivation
-    3. Arc across the series
-    4. Key personality traits
-    5. Visual appearance suggestions
-    
-    Format as JSON with structure:
-    {{
-        "characters": [
-            {{
-                "name": "string",
-                "archetype": "string",
-                "background": "string",
-                "character_arc": "string",
-                "traits": ["string"],
-                "visual_description": "string",
-                "appearance_evolution": ["string"]
-            }}
-        ],
-        "ensemble_dynamics": "string"
-    }}
-    
-    Output ONLY valid JSON, no markdown or explanations.
-    """
-    
-    response = model.generate_content(prompt)
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    
-    return parsed or {"characters": [], "ensemble_dynamics": ""}
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        
+        print(f"[DEBUG] Generating characters with model: {model_name}")
+        model = genai.GenerativeModel(model_name=model_name)
+        
+        prompt = f"""
+        Based on this story concept: "{core_idea}"
+        
+        Create detailed character profiles for a {episodes}-episode vertical series.
+        For each character, provide:
+        1. Character name and archetype
+        2. Background/motivation
+        3. Arc across the series
+        4. Key personality traits
+        5. Visual appearance suggestions
+        
+        Format as JSON with structure:
+        {{
+            "characters": [
+                {{
+                    "name": "string",
+                    "archetype": "string",
+                    "background": "string",
+                    "character_arc": "string",
+                    "traits": ["string"],
+                    "visual_description": "string",
+                    "appearance_evolution": ["string"]
+                }}
+            ],
+            "ensemble_dynamics": "string"
+        }}
+        
+        Output ONLY valid JSON, no markdown or explanations.
+        """
+        
+        response = model.generate_content(prompt)
+        raw_text = getattr(response, "text", None)
+        parsed = _safe_parse_json(raw_text)
+        
+        return parsed or {"characters": [], "ensemble_dynamics": ""}
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_character_development: {str(e)}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return {"characters": [], "ensemble_dynamics": ""}
 
 
 async def generate_dialogue_suggestions(
@@ -271,47 +310,54 @@ async def generate_dialogue_suggestions(
     model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate realistic dialogue suggestions for episodes"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    
-    model = genai.GenerativeModel(model_name=model_name)
-    
-    ep_title = episode.get("episode_title", "Episode")
-    narrative = episode.get("narrative_breakdown", "")
-    
-    prompt = f"""
-    Create realistic dialogue snippets for this episode:
-    Title: {ep_title}
-    Narrative: {narrative}
-    
-    Provide natural, engaging dialogue that fits the 90-second format.
-    Include:
-    1. Opening hook dialogue (0-10 seconds)
-    2. Mid-point tension dialogue (30-60 seconds)
-    3. Cliffhanger dialogue (75-90 seconds)
-    
-    Each dialogue should be short, punchy, and engaging.
-    Format as JSON:
-    {{
-        "dialogue_groups": [
-            {{
-                "time_block": "string",
-                "speaker": "string (or 'Multiple')",
-                "lines": ["string"],
-                "emotion": "string",
-                "purpose": "string"
-            }}
-        ]
-    }}
-    
-    Output ONLY valid JSON, no markdown.
-    """
-    
-    response = model.generate_content(prompt)
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    
-    return parsed or {"dialogue_groups": []}
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        
+        print(f"[DEBUG] Generating dialogue with model: {model_name}")
+        model = genai.GenerativeModel(model_name=model_name)
+        
+        ep_title = episode.get("episode_title", "Episode")
+        narrative = episode.get("narrative_breakdown", "")
+        
+        prompt = f"""
+        Create realistic dialogue snippets for this episode:
+        Title: {ep_title}
+        Narrative: {narrative}
+        
+        Provide natural, engaging dialogue that fits the 90-second format.
+        Include:
+        1. Opening hook dialogue (0-10 seconds)
+        2. Mid-point tension dialogue (30-60 seconds)
+        3. Cliffhanger dialogue (75-90 seconds)
+        
+        Each dialogue should be short, punchy, and engaging.
+        Format as JSON:
+        {{
+            "dialogue_groups": [
+                {{
+                    "time_block": "string",
+                    "speaker": "string (or 'Multiple')",
+                    "lines": ["string"],
+                    "emotion": "string",
+                    "purpose": "string"
+                }}
+            ]
+        }}
+        
+        Output ONLY valid JSON, no markdown.
+        """
+        
+        response = model.generate_content(prompt)
+        raw_text = getattr(response, "text", None)
+        parsed = _safe_parse_json(raw_text)
+        
+        return parsed or {"dialogue_groups": []}
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_dialogue_suggestions: {str(e)}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return {"dialogue_groups": []}
 
 
 async def generate_visual_mood_board(
@@ -320,51 +366,58 @@ async def generate_visual_mood_board(
     model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate visual mood board recommendations"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    
-    model = genai.GenerativeModel(model_name=model_name)
-    
-    prompt = f"""
-    Create a comprehensive visual mood board guide for a vertical video series:
-    Concept: {core_idea}
-    Genre: {genre}
-    
-    Provide specific visual recommendations:
-    1. Color palette (include hex codes)
-    2. Camera filters/editing style
-    3. Lighting design
-    4. Location aesthetics
-    5. Props and set design
-    6. Typography/text overlays
-    7. Transition styles
-    8. Animation/VFX suggestions
-    
-    Format as JSON:
-    {{
-        "color_palette": {{
-            "primary": ["string (hex)"],
-            "secondary": ["string (hex)"],
-            "accent": ["string (hex)"],
-            "reasoning": "string"
-        }},
-        "camera_style": "string",
-        "lighting_design": "string",
-        "locations": ["string"],
-        "props_and_sets": ["string"],
-        "typography": "string",
-        "transitions": ["string"],
-        "vfx_suggestions": ["string"]
-    }}
-    
-    Output ONLY valid JSON.
-    """
-    
-    response = model.generate_content(prompt)
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    
-    return parsed or {"color_palette": {}, "camera_style": ""}
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        
+        print(f"[DEBUG] Generating mood board with model: {model_name}")
+        model = genai.GenerativeModel(model_name=model_name)
+        
+        prompt = f"""
+        Create a comprehensive visual mood board guide for a vertical video series:
+        Concept: {core_idea}
+        Genre: {genre}
+        
+        Provide specific visual recommendations:
+        1. Color palette (include hex codes)
+        2. Camera filters/editing style
+        3. Lighting design
+        4. Location aesthetics
+        5. Props and set design
+        6. Typography/text overlays
+        7. Transition styles
+        8. Animation/VFX suggestions
+        
+        Format as JSON:
+        {{
+            "color_palette": {{
+                "primary": ["string (hex)"],
+                "secondary": ["string (hex)"],
+                "accent": ["string (hex)"],
+                "reasoning": "string"
+            }},
+            "camera_style": "string",
+            "lighting_design": "string",
+            "locations": ["string"],
+            "props_and_sets": ["string"],
+            "typography": "string",
+            "transitions": ["string"],
+            "vfx_suggestions": ["string"]
+        }}
+        
+        Output ONLY valid JSON.
+        """
+        
+        response = model.generate_content(prompt)
+        raw_text = getattr(response, "text", None)
+        parsed = _safe_parse_json(raw_text)
+        
+        return parsed or {"color_palette": {}, "camera_style": ""}
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_visual_mood_board: {str(e)}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return {"color_palette": {}, "camera_style": ""}
 
 
 async def generate_music_recommendations(
@@ -372,57 +425,64 @@ async def generate_music_recommendations(
     model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate music and sound design recommendations"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    
-    model = genai.GenerativeModel(model_name=model_name)
-    
-    emotions_summary = str(emotional_arcs)[:500]  # Truncate for API
-    
-    prompt = f"""
-    Create music and sound design recommendations based on these emotional arcs:
-    {emotions_summary}
-    
-    Provide specific music suggestions:
-    1. Opening theme (genre, mood, tempo)
-    2. Background music by emotion
-    3. Sound effects recommendations
-    4. Silence/breathing room placement
-    5. Music swells for climactic moments
-    6. Ending theme
-    
-    Include reference genres/artists where helpful.
-    
-    Format as JSON:
-    {{
-        "opening_theme": {{
-            "genre": "string",
-            "mood": "string",
-            "tempo_bpm": "integer",
-            "style": "string"
-        }},
-        "background_music": [
-            {{
-                "emotion": "string",
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        
+        print(f"[DEBUG] Generating music recommendations with model: {model_name}")
+        model = genai.GenerativeModel(model_name=model_name)
+        
+        emotions_summary = str(emotional_arcs)[:500]  # Truncate for API
+        
+        prompt = f"""
+        Create music and sound design recommendations based on these emotional arcs:
+        {emotions_summary}
+        
+        Provide specific music suggestions:
+        1. Opening theme (genre, mood, tempo)
+        2. Background music by emotion
+        3. Sound effects recommendations
+        4. Silence/breathing room placement
+        5. Music swells for climactic moments
+        6. Ending theme
+        
+        Include reference genres/artists where helpful.
+        
+        Format as JSON:
+        {{
+            "opening_theme": {{
                 "genre": "string",
-                "reference_artists": ["string"],
-                "duration": "string"
-            }}
-        ],
-        "sound_effects": ["string"],
-        "silence_placement": ["string"],
-        "climactic_swells": ["string"],
-        "ending_theme": "string"
-    }}
-    
-    Output ONLY valid JSON.
-    """
-    
-    response = model.generate_content(prompt)
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    
-    return parsed or {"opening_theme": {}, "background_music": []}
+                "mood": "string",
+                "tempo_bpm": "integer",
+                "style": "string"
+            }},
+            "background_music": [
+                {{
+                    "emotion": "string",
+                    "genre": "string",
+                    "reference_artists": ["string"],
+                    "duration": "string"
+                }}
+            ],
+            "sound_effects": ["string"],
+            "silence_placement": ["string"],
+            "climactic_swells": ["string"],
+            "ending_theme": "string"
+        }}
+        
+        Output ONLY valid JSON.
+        """
+        
+        response = model.generate_content(prompt)
+        raw_text = getattr(response, "text", None)
+        parsed = _safe_parse_json(raw_text)
+        
+        return parsed or {"opening_theme": {}, "background_music": []}
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_music_recommendations: {str(e)}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return {"opening_theme": {}, "background_music": []}
 
 
 async def generate_shot_composition(
@@ -430,55 +490,62 @@ async def generate_shot_composition(
     model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate shot composition and framing suggestions"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    
-    model = genai.GenerativeModel(model_name=model_name)
-    
-    ep_title = episode.get("episode_title", "")
-    narrative = episode.get("narrative_breakdown", "")
-    
-    prompt = f"""
-    Create detailed shot composition guides for this episode of a vertical video:
-    Title: {ep_title}
-    Story: {narrative}
-    
-    Break down shots by time blocks:
-    1. Opening shot (0-15s): Hook the viewer
-    2. Build shots (15-60s): Develop the story
-    3. Climax shot (60-75s): Peak moment
-    4. Cliffhanger shot (75-90s): Leave them wanting more
-    
-    For each section provide:
-    - Shot type (wide, medium, close-up, etc.)
-    - Camera movement (pan, zoom, static)
-    - Subject framing
-    - Depth of field
-    - Focus pulling
-    
-    Format as JSON:
-    {{
-        "shot_breakdown": [
-            {{
-                "time_block": "string",
-                "shot_type": "string",
-                "camera_movement": "string",
-                "framing": "string",
-                "depth_of_field": "string",
-                "focus_pulling": "string",
-                "purpose": "string"
-            }}
-        ],
-        "technical_notes": "string",
-        "equipment_suggestions": ["string"]
-    }}
-    
-    Output ONLY valid JSON.
-    """
-    
-    response = model.generate_content(prompt)
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    
-    return parsed or {"shot_breakdown": [], "technical_notes": ""}
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        
+        print(f"[DEBUG] Generating shot composition with model: {model_name}")
+        model = genai.GenerativeModel(model_name=model_name)
+        
+        ep_title = episode.get("episode_title", "")
+        narrative = episode.get("narrative_breakdown", "")
+        
+        prompt = f"""
+        Create detailed shot composition guides for this episode of a vertical video:
+        Title: {ep_title}
+        Story: {narrative}
+        
+        Break down shots by time blocks:
+        1. Opening shot (0-15s): Hook the viewer
+        2. Build shots (15-60s): Develop the story
+        3. Climax shot (60-75s): Peak moment
+        4. Cliffhanger shot (75-90s): Leave them wanting more
+        
+        For each section provide:
+        - Shot type (wide, medium, close-up, etc.)
+        - Camera movement (pan, zoom, static)
+        - Subject framing
+        - Depth of field
+        - Focus pulling
+        
+        Format as JSON:
+        {{
+            "shot_breakdown": [
+                {{
+                    "time_block": "string",
+                    "shot_type": "string",
+                    "camera_movement": "string",
+                    "framing": "string",
+                    "depth_of_field": "string",
+                    "focus_pulling": "string",
+                    "purpose": "string"
+                }}
+            ],
+            "technical_notes": "string",
+            "equipment_suggestions": ["string"]
+        }}
+        
+        Output ONLY valid JSON.
+        """
+        
+        response = model.generate_content(prompt)
+        raw_text = getattr(response, "text", None)
+        parsed = _safe_parse_json(raw_text)
+        
+        return parsed or {"shot_breakdown": [], "technical_notes": ""}
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_shot_composition: {str(e)}")
+        import traceback
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return {"shot_breakdown": [], "technical_notes": ""}
 
