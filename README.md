@@ -152,7 +152,7 @@ Or open `frontend/index.html` directly in your browser (API calls will work cros
     "genre": "thriller",
     "tone": "suspenseful",
     "target_audience": "18-35",
-    "model_name": "gemini-2.5-flash"
+    "model_name": "gemini-3.1-flash-lite-preview"
   }
   ```
 
@@ -260,7 +260,7 @@ Change the Gemini model by updating `model_name` in the request:
 ```
 
 Available models:
-- `gemini-2.5-flash` (default, fast)
+- `gemini-3.1-flash-lite-preview` (default, fastest and most affordable)
 - `gemini-1.5-pro` (more detailed)
 - `gemini-1.5-flash` (faster)
 
@@ -281,7 +281,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ## 📊 Performance Tips
 
 - **Episode Count:** Start with 6 episodes; more episodes = longer processing
-- **Model Selection:** `gemini-2.5-flash` is fastest for hackathons
+- **Model Selection:** `gemini-3.1-flash-lite-preview` is fastest and most cost-effective
 - **Batch Requests:** The backend can handle concurrent requests
 - **Caching:** Consider caching results for the same story idea
 
@@ -334,7 +334,7 @@ This project is provided as-is for educational and commercial use.
 GEMINI_API_KEY="YOUR_REAL_GEMINI_KEY_HERE"
 ```
 
-> Your key must have access to a text generation model such as `gemini-2.5-flash`.
+> Your key must have access to a text generation model such as `gemini-3.1-flash-lite-preview`.
 
 ### 2. Install Python dependencies
 

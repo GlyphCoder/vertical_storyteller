@@ -170,7 +170,7 @@ def _compute_engine_metrics(series_json: Dict[str, Any]) -> Dict[str, Any]:
 def generate_episodic_intelligence(
     core_idea: str,
     desired_episodes: int,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
     genre: str = "",
     tone: str = "",
     target_audience: str = "",
@@ -179,22 +179,39 @@ def generate_episodic_intelligence(
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    model = _get_model(model_name)
-    prompt = _build_user_prompt(core_idea, desired_episodes, genre, tone, target_audience)
-    response = model.generate_content(prompt)
+    try:
+        print(f"[DEBUG] Initializing model: {model_name}")
+        model = _get_model(model_name)
+        
+        print(f"[DEBUG] Building prompt...")
+        prompt = _build_user_prompt(core_idea, desired_episodes, genre, tone, target_audience)
+        
+        print(f"[DEBUG] Calling Gemini API...")
+        response = model.generate_content(prompt)
+        
+        print(f"[DEBUG] Response type: {type(response)}, has text: {hasattr(response, 'text')}")
+        raw_text = getattr(response, "text", None)
+        
+        if not raw_text:
+            raise ValueError(f"Gemini API returned empty text. Response: {response}")
+        
+        print(f"[DEBUG] Raw text length: {len(raw_text)}")
+        parsed = _safe_parse_json(raw_text)
+        
+        if not parsed:
+            raise ValueError(f"Failed to parse JSON from Gemini response. Raw text preview: {raw_text[:500]}")
 
-    raw_text = getattr(response, "text", None)
-    parsed = _safe_parse_json(raw_text)
-    if not parsed:
-        raise ValueError("Failed to parse JSON from Gemini response.")
+        print(f"[DEBUG] Computing metrics...")
+        engine_metrics = _compute_engine_metrics(parsed)
 
-    engine_metrics = _compute_engine_metrics(parsed)
-
-    return {
-        "series": parsed,
-        "engine_metrics": engine_metrics,
-        "raw_text": raw_text,
-    }
+        return {
+            "series": parsed,
+            "engine_metrics": engine_metrics,
+            "raw_text": raw_text,
+        }
+    except Exception as e:
+        print(f"[ERROR] Exception in generate_episodic_intelligence: {str(e)}")
+        raise
 
 
 # ============================================================================
@@ -204,7 +221,7 @@ def generate_episodic_intelligence(
 async def generate_character_development(
     core_idea: str,
     episodes: int,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate detailed character development arcs and profiles"""
     if not GEMINI_API_KEY:
@@ -251,7 +268,7 @@ async def generate_character_development(
 
 async def generate_dialogue_suggestions(
     episode: Dict[str, Any],
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate realistic dialogue suggestions for episodes"""
     if not GEMINI_API_KEY:
@@ -300,7 +317,7 @@ async def generate_dialogue_suggestions(
 async def generate_visual_mood_board(
     core_idea: str,
     genre: str = "drama",
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate visual mood board recommendations"""
     if not GEMINI_API_KEY:
@@ -352,7 +369,7 @@ async def generate_visual_mood_board(
 
 async def generate_music_recommendations(
     emotional_arcs: List[Dict[str, Any]],
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate music and sound design recommendations"""
     if not GEMINI_API_KEY:
@@ -410,7 +427,7 @@ async def generate_music_recommendations(
 
 async def generate_shot_composition(
     episode: Dict[str, Any],
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-3.1-flash-lite-preview",
 ) -> Dict[str, Any]:
     """Generate shot composition and framing suggestions"""
     if not GEMINI_API_KEY:

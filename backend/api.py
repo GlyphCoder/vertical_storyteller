@@ -1,12 +1,13 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 import os
 import json
 import io
 from typing import Optional, List
 import base64
+import google.generativeai as genai
 
 from .episodic_engine import (
     generate_episodic_intelligence,
@@ -25,12 +26,13 @@ except ImportError:
 
 
 class AnalyseRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     core_idea: str = Field(..., description="Creator's core vertical series idea")
     episode_count: int = Field(
         6, ge=5, le=8, description="Number of episodes (5–8 inclusive)"
     )
     model_name: str = Field(
-        "gemini-2.5-flash",
+        "gemini-3.1-flash-lite-preview",
         description="Gemini model identifier",
     )
     genre: Optional[str] = Field("drama", description="Story genre")
@@ -39,29 +41,34 @@ class AnalyseRequest(BaseModel):
 
 
 class CharacterRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     core_idea: str
     episode_count: int = 6
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.1-flash-lite-preview"
 
 
 class DialogueRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     episode_data: dict
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.1-flash-lite-preview"
 
 
 class MoodBoardRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     episode_data: dict
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.1-flash-lite-preview"
 
 
 class MusicRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     emotional_arcs: List[dict]
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.1-flash-lite-preview"
 
 
 class ShotCompositionRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     episode_data: dict
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.1-flash-lite-preview"
 
 
 class TextToSpeechRequest(BaseModel):
@@ -92,7 +99,10 @@ async def analyse_story(payload: AnalyseRequest):
         raise HTTPException(status_code=400, detail="core_idea cannot be empty.")
 
     try:
+        print(f"[DEBUG] Starting analysis for: {payload.core_idea[:50]}")
+        
         # Generate main episodic intelligence
+        print(f"[DEBUG] Calling generate_episodic_intelligence...")
         result = generate_episodic_intelligence(
             core_idea=payload.core_idea,
             desired_episodes=payload.episode_count,
@@ -101,8 +111,10 @@ async def analyse_story(payload: AnalyseRequest):
             tone=payload.tone,
             target_audience=payload.target_audience,
         )
+        print(f"[DEBUG] Result keys: {result.keys() if isinstance(result, dict) else type(result)}")
         
         # Generate character development
+        print(f"[DEBUG] Calling generate_character_development...")
         character_data = await generate_character_development(
             core_idea=payload.core_idea,
             episodes=payload.episode_count,
@@ -110,14 +122,21 @@ async def analyse_story(payload: AnalyseRequest):
         )
         
         result["character_development"] = character_data
+        print(f"[DEBUG] Added character_development")
         
         # Generate dialogue suggestions for first episode
-        if "episodes" in result and len(result["episodes"]) > 0:
+        series = result.get("series", {})
+        episodes = series.get("episodes", [])
+        print(f"[DEBUG] Series keys: {series.keys() if isinstance(series, dict) else type(series)}")
+        print(f"[DEBUG] Episodes count: {len(episodes) if isinstance(episodes, list) else type(episodes)}")
+        
+        if episodes and len(episodes) > 0:
             dialogue_data = await generate_dialogue_suggestions(
-                episode=result["episodes"][0],
+                episode=episodes[0],
                 model_name=payload.model_name,
             )
             result["sample_dialogues"] = dialogue_data
+            print(f"[DEBUG] Added sample_dialogues")
         
         # Generate visual mood board
         mood_board = await generate_visual_mood_board(
@@ -126,11 +145,12 @@ async def analyse_story(payload: AnalyseRequest):
             model_name=payload.model_name,
         )
         result["visual_mood_board"] = mood_board
+        print(f"[DEBUG] Added visual_mood_board")
         
         # Generate music recommendations
         emotional_arcs = []
-        if "episodes" in result:
-            for ep in result["episodes"]:
+        if episodes:
+            for ep in episodes:
                 if "emotional_arc_analysis" in ep:
                     emotional_arcs.extend(ep["emotional_arc_analysis"])
         
@@ -139,18 +159,24 @@ async def analyse_story(payload: AnalyseRequest):
             model_name=payload.model_name,
         )
         result["music_recommendations"] = music_recs
+        print(f"[DEBUG] Added music_recommendations")
         
         # Generate shot composition suggestions
-        if "episodes" in result and len(result["episodes"]) > 0:
+        if episodes and len(episodes) > 0:
             shot_recs = await generate_shot_composition(
-                episode=result["episodes"][0],
+                episode=episodes[0],
                 model_name=payload.model_name,
             )
             result["shot_composition"] = shot_recs
+            print(f"[DEBUG] Added shot_composition")
         
+        print(f"[DEBUG] Analysis complete. Final result keys: {result.keys()}")
         return result
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[ERROR] Exception occurred: {error_trace}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -265,8 +291,24 @@ async def health_check():
     return {"status": "healthy", "version": "2.0.0"}
 
 
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
+@app.get("/api/test-gemini")
+async def test_gemini():
+    """Test if Gemini API is accessible"""
+    try:
+        import os
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"status": "error", "message": "GEMINI_API_KEY not set"}
+        
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+        response = model.generate_content("Say 'API is working' in one sentence")
+        
+        return {
+            "status": "success",
+            "gemini_working": True,
+            "response": response.text if hasattr(response, 'text') else str(response)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
